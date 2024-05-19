@@ -1,0 +1,331 @@
+---
+title: "Homework 3"
+author: "Vedant Limbhare"
+date: "2023-05-02"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r include=FALSE}
+library(tree)
+library(rpart)
+library(rattle)
+library(sparkline)
+library(visNetwork)
+library(randomForest)
+library(ISLR)
+library(tidyverse)
+library("reshape2")
+library(psych)
+library(gridExtra)
+library(caret)
+
+```
+
+Q1.Fit an logistic regression model to classify forged banknote from genuine banknotes. 
+
+```{r}
+bank_auth <- read.csv("data_banknote_authentication.csv")
+str(bank_auth)
+```
+
+
+```{r}
+bank_auth$class <- factor(bank_auth$class, levels = c(0,1), labels=c("genuine", "forged"))
+```
+
+
+```{r}
+attach(bank_auth)
+```
+
+```{r}
+summary(bank_auth)
+```
+
+Q1.1 Produce some numerical and graphical summaries of the data set. Explain the relationships.
+
+```{r}
+pairs.panels(bank_auth)
+```
+
+```{r}
+df_box <- melt(bank_auth, id.var = "class")
+
+
+ggplot(data = df_box, aes(x=class, y=value)) + 
+  geom_boxplot(aes(fill=class)) + facet_wrap(~variable,  scales = "free")
+```
+
+From the above Box plots, we can see that Variance has correlation with the class variable. We can easily differentiate between forged and genuine class values by using Variance.
+
+Q1.2 Is this a balanced data set?.
+
+```{r}
+table(bank_auth$class)
+```
+
+From the above values, we can observe that the genuine and forged values are almost equal hence there is no biases in the dataset and we can conclude that the dataset is Balanced.
+
+Q1.3 Use the full data set to perform a logistic regression with Class as the response variable. Do any of the predictors appear to be statistically significant? If so, which ones?
+
+```{r}
+glm.class=glm(class~.,data=bank_auth,family="binomial") 
+summary(glm.class)
+```
+
+
+```{r fig.width=9}
+p1 <- bank_auth %>%
+    mutate(prob = ifelse(class == "forged", 1, 0)) %>%
+    ggplot(aes(Variance, prob)) +
+    geom_point(alpha = 0.15) +
+    geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+    ggtitle("Logistic regression model fit") +
+    xlab("Variance") +
+    ylab("Class")
+
+p2 <- bank_auth %>%
+    mutate(prob = ifelse(class == "forged", 1, 0)) %>%
+    ggplot(aes(skewness, prob)) +
+    geom_point(alpha = 0.15) +
+    geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+    ggtitle("Logistic regression model fit") +
+    xlab("Skewness") +
+    ylab("Class")
+
+p3 <- bank_auth %>%
+    mutate(prob = ifelse(class == "forged", 1, 0)) %>%
+    ggplot(aes(curtosis, prob)) +
+    geom_point(alpha = 0.15) +
+    geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+    ggtitle("Logistic regression model fit") +
+    xlab("Curtosis") +
+    ylab("Class")
+
+p4 <- bank_auth %>%
+    mutate(prob = ifelse(class == "forged", 1, 0)) %>%
+    ggplot(aes(entropy, prob)) +
+    geom_point(alpha = 0.15) +
+    geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+    ggtitle("Logistic regression model fit") +
+    xlab("Entropy") +
+    ylab("Class")
+
+
+grid.arrange(p1, p2, p3, p4, nrow=2, ncol= 2)
+```
+
+```{r}
+exp(coef(glm.class))
+```
+
+```{r}
+glm.var=glm(class~Variance,data=bank_auth,family="binomial") 
+```
+
+```{r}
+confint(glm.var)
+```
+
+From the above observed graphs, Variance has relation between class variable. The skewness does shows a little relation but other variables are insignificant to determine class values.
+
+Q1.4 Compute the confusion matrix and overall fraction of correct predictions. Explain what the confusion matrix is telling you about the types of mistakes made by logistic regression.
+
+```{r}
+glm.probs=predict(glm.class,type="response")
+glm.probs[1:10]
+```
+
+
+```{r}
+glm.pred=rep("genuine",nrow(bank_auth))
+glm.pred[glm.probs>.5]="forged"
+```
+
+
+```{r warning =FALSE}
+confusionMatrix(as.factor(glm.pred),class) 
+```
+
+We can distinguish two different sorts of errors made by the logistic regression model based on the confusion matrix:
+
+False negatives: The model wrongly classified 6 legitimate papers as forgeries . Due to the model's failure to recognize these papers as authentic, they are known as false negatives.
+
+False positives: The model predicted 5 fabricated documents as genuine when it should have been forgery. These are referred to as false positives because the model predicted wrong forged entries.
+
+In total, the logistic regression model only miscalculated 11 times out of 1362 documents. The model show's high predictability of 0.992.
+
+
+Q1.5 Create a training set with 80% of the observations, and a testing set containing the remaining 20%.Compute the confusion matrix and the overall fraction of correct prediction for the testing data set.
+
+
+```{r warning = FALSE}
+set.seed(12)
+
+index <- createDataPartition(bank_auth$class, p = 0.8, list = FALSE)
+train <- bank_auth[index, ]
+test <- bank_auth[-index, ]
+
+glm.class2 <- glm(class ~ ., data = train, family = binomial)
+
+glm.pred2 <- predict(glm.class2, newdata = test, type = "response")
+glm.pred2 <- ifelse(glm.pred2 >= 0.5, "forged", "genuine")
+
+confusionMatrix(as.factor(glm.pred2), as.factor(test$class))
+```
+
+Overall fraction of correct predictions for testing dataset given by confusion matrix are:
+
+The overall fraction of correct prediction, or accuracy, is 0.9927. This indicates that the model correctly predicted 99.27% of the papers as forged and genuine in the testing data-set.
+
+True negatives: The model had 122 forged documents in the test data-set, and the model predicted 120 of them as genuine and 2 documents as false negatives.
+
+True positives: The model had 152 genuine documents in the test data-set, and the model predicted all of them as genuine.
+
+In total, the logistic regression model only miscalculated 2 times out of 272 documents. The model show's high predictability of 99.27%.
+
+
+
+Q2. Fit an regression tree model to predict quality of wine.
+
+```{r}
+wine_ds2 <- read.csv2("winequality.csv")
+```
+
+```{r}
+set.seed(1)
+train = sample(1:nrow(wine_ds2), nrow(wine_ds2)/2)
+```
+
+Q2.1 Produce some numerical and graphical summaries of the data set. Explain the relationships.
+
+```{r}
+tree.wine_ds2=tree(quality~.,wine_ds2,subset=train)
+summary(tree.wine_ds2)
+```
+
+```{r fig.width=9}
+plot(tree.wine_ds2)
+text(tree.wine_ds2,pretty=0)
+```
+
+```{r fig.width=9}
+
+tree.wine_ds2_1 = rpart(quality~ alcohol+volatile.acidity+free.sulfur.dioxide,wine_ds2,subset = train)
+
+fancyRpartPlot(tree.wine_ds2_1)
+```
+
+```{r}
+visTree(tree.wine_ds2_1)
+```
+
+```{r fig.width=9}
+cv.wine=cv.tree(tree.wine_ds2)
+plot(cv.wine$size ,cv.wine$dev,type='b')
+```
+
+```{r fig.width=9}
+prune.wine=prune.tree(tree.wine_ds2,best=5)
+plot(prune.wine)
+text(prune.wine,pretty=0)
+```
+As seen from above observations, we can conclude that the variable "Quantity" is mostly dependent on 3 variables from wine dataset mainly: 'volatile.acidity', 'free.sulphur.dioxide' and 'alcohol'. Further we have tried to plot the decision tree using only this 3 variables. After plotting, we can see that the least 'dev' value we have got is using 5 decision leafs and hence we have used the best=5 method in our prune model for cross-validation.
+
+Q2.2 Create a training set with 80% of the observations, and a testing set containing the remaining 20%.
+
+```{r}
+set.seed(11)
+train = sample(1:nrow(wine_ds2), 0.8*nrow(wine_ds2))
+```
+
+Q2.3 Fit a regression tree with quality as the response variable using the training set. Plot the tree and interpret the results. What test MSE do you obtain?
+
+
+```{r}
+tree.wine_ds2=tree(quality~.,wine_ds2,subset=train)
+summary(tree.wine_ds2)
+```
+
+```{r fig.width=9}
+plot(tree.wine_ds2)
+text(tree.wine_ds2,pretty=0)
+```
+
+```{r fig.width=9}
+cv.wine=cv.tree(tree.wine_ds2)
+plot(cv.wine$size ,cv.wine$dev,type='b')
+```
+
+```{r}
+yhat=predict(tree.wine_ds2,newdata=wine_ds2[-train,])
+wine.test=wine_ds2[-train,"quality"]
+
+mean((yhat-wine.test)^2)
+```
+
+```{r}
+sqrt(mean((yhat-wine.test)^2))
+```
+
+After fitting 80% observations in training set, we observe that the variables used for constructing decision tree is 4 variables mainly: "alcohol", "volatile.acidity", "density" and "free.sulfur.dioxide".
+
+
+Q2.4 Use cross-validation in order to determine the optimal level of tree complexity. Does pruning the tree improve the test MSE?
+
+```{r}
+yhat=predict(prune.wine,newdata=wine_ds2[-train,])
+wine.test=wine_ds2[-train,"quality"]
+
+mean((yhat-wine.test)^2)
+```
+
+```{r}
+sqrt(mean((yhat-wine.test)^2))
+```
+
+After pruning, we can see a slight increase in the MSE value which proves that using best 5 variables actually increase the MSE value. Hence, we will consider the method without pruning.
+
+
+Q2.5 Use random forests to analyze this data. What test MSE do you obtain?
+
+
+```{r echo=FALSE}
+set.seed(1)
+train = sample(1:nrow(wine_ds2), nrow(wine_ds2)/2)
+```
+
+
+```{r echo=FALSE}
+yhat=predict(tree.wine_ds2,newdata=wine_ds2[-train,])
+wine.test=wine_ds2[-train,"quality"]
+
+```
+
+```{r}
+set.seed(12345)
+rf.wine=randomForest(quality~.,data=wine_ds2,subset=train,mtry=3,importance=TRUE)
+yhat.rf = predict(rf.wine,newdata=wine_ds2[-train,])
+mean((yhat.rf - wine.test)^2)
+```
+
+
+After using Random forest method on the same dataset, we are getting the lowest MSE value when using predictor variables as 3 for each tree by using mtry=3. The MSE value that we get after using Random forest is 0.4760 which is lower than the MSE value 0.5702 which we obtained by using Decision Tree method.
+
+```{r}
+plot(rf.wine)
+```
+
+Q2.6 Use the importance() function to determine which variables are most important.
+
+```{r}
+importance(rf.wine)
+```
+
+```{r fig.width=9}
+pred_Imp <- varImpPlot(rf.wine)
+```
+
+The most important variables that we get are density, alcohol, volatile.acidity, residual sugar.

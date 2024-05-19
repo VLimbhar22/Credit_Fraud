@@ -1,0 +1,166 @@
+---
+title: "Homework3.1"
+author: "Vedant Limbhare"
+date: "2023-05-02"
+output: html_document
+---
+
+```{r}
+library(ISLR)
+library(tidyverse)
+library("reshape2")
+library(psych)
+library(gridExtra)
+library(caret)
+```
+
+```{r}
+bank_auth <- read.csv("data_banknote_authentication.csv")
+str(bank_auth)
+```
+```{r}
+bank_auth$class <- factor(bank_auth$class, levels = c(0,1), labels=c("genuine", "forged"))
+```
+
+
+```{r}
+attach(bank_auth)
+```
+
+```{r}
+summary(bank_auth)
+```
+Q1.1 Produce some numerical and graphical summaries of the data set. Explain the relationships.
+
+```{r}
+pairs.panels(bank_auth)
+```
+
+```{r}
+df_box <- melt(bank_auth, id.var = "class")
+
+
+ggplot(data = df_box, aes(x=class, y=value)) + 
+  geom_boxplot(aes(fill=class)) + facet_wrap(~variable,  scales = "free")
+```
+
+From the above Box plots, we can see that Variance has correlation with the class variable. We can easily differentiate between forged and genuine class values by using Variance.
+
+Q1.2 Is this a balanced data set?.
+
+```{r}
+table(bank_auth$class)
+```
+
+From the above values, we can observe that the genuine and forged values are almost equal hence there is no biases in the dataset and we can conclude that the dataset is Balanced.
+
+Q1.3 Use the full data set to perform a logistic regression with Class as the response variable. Do any of the predictors appear to be statistically significant? If so, which ones?
+
+```{r}
+glm.class=glm(class~.,data=bank_auth,family="binomial") 
+summary(glm.class)
+```
+
+
+```{r fig.width=9}
+p1 <- bank_auth %>%
+    mutate(prob = ifelse(class == "forged", 1, 0)) %>%
+    ggplot(aes(Variance, prob)) +
+    geom_point(alpha = 0.15) +
+    geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+    ggtitle("Logistic regression model fit") +
+    xlab("Variance") +
+    ylab("Class")
+
+p2 <- bank_auth %>%
+    mutate(prob = ifelse(class == "forged", 1, 0)) %>%
+    ggplot(aes(skewness, prob)) +
+    geom_point(alpha = 0.15) +
+    geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+    ggtitle("Logistic regression model fit") +
+    xlab("Skewness") +
+    ylab("Class")
+
+p3 <- bank_auth %>%
+    mutate(prob = ifelse(class == "forged", 1, 0)) %>%
+    ggplot(aes(curtosis, prob)) +
+    geom_point(alpha = 0.15) +
+    geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+    ggtitle("Logistic regression model fit") +
+    xlab("Curtosis") +
+    ylab("Class")
+
+p4 <- bank_auth %>%
+    mutate(prob = ifelse(class == "forged", 1, 0)) %>%
+    ggplot(aes(entropy, prob)) +
+    geom_point(alpha = 0.15) +
+    geom_smooth(method = "glm", method.args = list(family = "binomial")) +
+    ggtitle("Logistic regression model fit") +
+    xlab("Entropy") +
+    ylab("Class")
+
+
+grid.arrange(p1, p2, p3, p4, nrow=2, ncol= 2)
+```
+
+```{r}
+exp(coef(glm.class))
+```
+
+```{r}
+glm.var=glm(class~Variance,data=bank_auth,family="binomial") 
+```
+
+```{r}
+confint(glm.var)
+```
+
+From the above observed graphs, Variance has relation between class variable. The skewness does shows a little relation but other variables are insignificant to determine class values.
+
+Q1.4 Compute the confusion matrix and overall fraction of correct predictions. Explain what the confusion matrix is telling you about the types of mistakes made by logistic regression.
+
+```{r}
+glm.probs=predict(glm.class,type="response")
+glm.probs[1:10]
+```
+
+
+```{r}
+glm.pred=rep("genuine",nrow(bank_auth))
+glm.pred[glm.probs>.5]="forged"
+```
+
+
+```{r}
+confusionMatrix(as.factor(glm.pred),class) 
+```
+
+Q1.5 Create a training set with 80% of the observations, and a testing set containing the remaining 20%.Compute the confusion matrix and the overall fraction of correct prediction for the testing data set.
+
+
+```{r warning = FALSE}
+set.seed(12)
+
+index <- createDataPartition(bank_auth$class, p = 0.8, list = FALSE)
+train <- bank_auth[index, ]
+test <- bank_auth[-index, ]
+
+glm.class2 <- glm(class ~ ., data = train, family = binomial)
+
+glm.pred2 <- predict(glm.class2, newdata = test, type = "response")
+glm.pred2 <- ifelse(glm.pred2 >= 0.5, "forged", "genuine")
+
+confusionMatrix(as.factor(glm.pred2), as.factor(test$class))
+```
+
+
+
+
+
+
+
+
+
+
+
+
