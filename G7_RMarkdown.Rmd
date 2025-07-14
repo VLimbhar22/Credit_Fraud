@@ -1,0 +1,711 @@
+---
+title: "STAT515_005 FINAL PROJECT GROUP 7 - CREDIT CARD FRAUD DETECTION"
+author: "Vedant Shamling Limbhare, Prathyusha Elipay"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+library(tidyverse)
+library(geosphere)
+library(caTools)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(ROSE)
+library(ROCR)
+library(pROC)
+library(tree)
+library(sparkline)
+library(visNetwork)
+library(Rborist)
+library(xgboost)
+```
+
+```{r, message=FALSE}
+cc_fraud_original <- as.data.frame(read_csv("credit_card_fraud.csv"))
+str(cc_fraud_original)
+```
+
+```{r}
+any(is.na(cc_fraud_original))
+```
+
+```{r}
+
+cities <- c("Albuquerque", "American Fork", "Arvada", "Aurora", "Azusa", "Ballwin", "Bay City", "Broomfield", "Burbank",
+            "Burlington", "Camden", "Campbell", "Caroll", "Colorado Springs", "Colton", "Conway", "Corona", "Daly City", "Downey",
+            "Espanola", "Eugene", "Fullerton", "Glendale", "Huntington Beach", "Independence", "Issaquah", "Kansas City", "Kent",
+            "Kirk", "Kirtland Afb", "La Grande", "Laguna Hills", "Lake Oswego", "Laramie", "Littleton", "Los Angeles", "Lowell",
+            "Malad City", "Manville", "Matthews", "Meadville", "Meridian", "Mesa", "Moab", "Moriarty", "Napa", "Newberg", "Newhall",
+            "Norwalk", "Oakland", "Odessa", "Omaha", "Owensville", "Palmdale", "Parker", "Parker Dam", "Phoenix", "Pleasant Hill",
+            "Portland", "Pueblo", "Ravenna", "Red Cliff", "Red River", "Redford", "Riverton", "Rock Springs", "Rocky Mount",
+            "Roseland", "Ruidoso", "Sacramento", "Saint Louis", "San Diego", "San Jose", "Santa Monica", "Scotts Mills", "Seattle",
+            "Seligman", "Shedd", "Smith River", "Spirit Lake", "Stayton", "Sun City", "Syracuse", "Tekoa", "Thompson", "Unionville",
+            "Utica", "Vancouver", "Vinton", "Westerville", "Westfir", "Wheaton", "Williamsburg", "Woods Cross")
+
+business_jobs <- c("Accountant", "Advertising account planner", "Airline pilot", "Associate Professor", "Buyer, industrial", 
+                   "Call centre manager", "Chief Marketing Officer", "Comptroller", "Contractor", "Economist", 
+                   "Education administrator", "Education officer, museum", "Engineering managers", "Freight forwarder", 
+                   "Hotel manager", "Human resources officer", "Information systems manager", "Insurance broker", 
+                   "Investment analyst", "Investment banker, corporate", "IT consultant", "Lecturer, higher education", 
+                   "Local government officer", "Marketing executive", "Occupational hygienist", 
+                   "Product/process development scientist", "Production manager", "Public house manager", 
+                   "Public relations account executive", "Retail merchandiser", "Sales executive, IT", "Surveyor, minerals", 
+                   "Systems analyst", "Tax inspector", "Tourist information centre manager")
+
+
+engineering_jobs <- c("Aeronautical engineer", "Agricultural consultant", "Architect", "Architectural technologist", 
+                      "Armed forces training and education officer", "Building surveyor", "Chemical engineer", 
+                      "Civil engineer, contracting", "Civil Service administrator", "Civil Service fast streamer", 
+                      "Colour technologist", "Development worker, international aid", "Electronics engineer", "Engineer, automotive", 
+                      "Engineer, biomedical", "Engineer, building services", "Engineer, civil (consulting)", 
+                      "Engineer, communications", "Engineer, electronics", "Engineer, maintenance", "Engineer, petroleum", 
+                      "Engineer, production", "Engineer, site", "Geologist, engineering", "Geoscientist", "Materials engineer", 
+                      "Metallurgist", "Naval architect", "Network engineer", "Petroleum engineer", 
+                      "Planning and development surveyor", "Product designer", "Research scientist (physical sciences)", 
+                      "Scientist, marine", "Scientist, physiological", "Surveyor, land/geomatics", "Surveyor, mining", 
+                      "Systems developer", "Water engineer", "Wellsite geologist")
+
+
+healthcare_jobs <- c("Chiropodist", "Clinical cytogeneticist", "Clinical research associate", "Counselling psychologist", 
+                     "Counsellor", "Cytogeneticist", "Exercise physiologist", "Fine artist", "Forensic psychologist", 
+                     "Health physicist", "Health service manager", "Mental health nurse", "Music therapist", "Nurse, children's", 
+                     "Nurse, mental health", "Occupational psychologist", "Osteopath", "Pharmacist, hospital", "Physiotherapist", 
+                     "Scientist, audiological", "Scientist, research (maths)", "Therapist, art", "Therapist, horticultural", 
+                     "Therapist, music", "Therapist, occupational")
+
+creative_jobs <- c("Glass blower/designer", "Historic buildings inspector/conservation officer", "Journalist, newspaper", 
+                   "Landscape architect", "Location manager", "Magazine features editor", "Museum education officer", 
+                   "Museum/gallery exhibitions officer", "Musician", "Set designer", "Television/film/video producer", "Video editor")
+
+legal_jobs <- c("Barrister", "Careers information officer", "Chartered legal executive (England and Wales)", 
+                "Chartered public finance accountant", "Community arts worker", "Immigration officer", "Intelligence analyst", 
+                "Licensed conveyancer", "Public librarian", "Research officer, political party", "Solicitor, Scotland", 
+                "Special educational needs teacher")
+
+education_jobs <- c("Early years teacher", "Learning mentor", "Private music teacher", "Teacher, adult education", 
+                    "Teacher, early years/pre", "Teaching laboratory technician", "TEFL teacher")
+```
+
+```{r}
+cc_fraud <- cc_fraud_original %>%
+  reframe(area = ifelse(cc_fraud_original$state %in% c("AK", "CA", "HI", "OR", "WA"), "west",
+                        ifelse(cc_fraud_original$state %in% c("MO", "NE"), "midwest", "southwest")),
+          city_type = ifelse(cc_fraud_original$city %in% cities, "urban", "rural"),
+          city_pop = city_pop,
+          merchant_type = ifelse(cc_fraud_original$category %in% 
+                                   c("gas_transport", "grocery_net", "grocery_pos", "health_fitness", "home", "kids_pets",
+                                     "personal_care"), "essential", "discretionary"),
+          trans_amt = round(amt, 2),
+          trans_hour = ifelse(format(trans_date_trans_time, "%H") %in% c(6:11), "morning", 
+                              ifelse(format(trans_date_trans_time, "%H") %in% c(12:18), "afternoon",
+                                     ifelse(format(trans_date_trans_time, "%H") %in% c(17:22), "evening", "night"))), 
+          is_weekend = ifelse(format(cc_fraud_original$trans_date_trans_time, "%A") %in% c("Saturday", "Sunday"), 1, 0),
+          cc_holder_age = as.numeric(round(difftime(cc_fraud_original$trans_date_trans_time, cc_fraud_original$dob, 
+                                          units = "days") / 365.25, 0)),
+          is_business_jobs = ifelse(cc_fraud_original$job %in% business_jobs, "1", "0"),
+          is_engineering_jobs = ifelse(cc_fraud_original$job %in% engineering_jobs, "1", "0"),
+          is_healthcare_jobs = ifelse(cc_fraud_original$job %in% healthcare_jobs, "1", "0"),
+          is_creative_jobs = ifelse(cc_fraud_original$job %in% creative_jobs, "1", "0"),
+          is_legal_jobs = ifelse(cc_fraud_original$job %in% legal_jobs, "1", "0"),
+          is_education_jobs = ifelse(cc_fraud_original$job %in% education_jobs, "1", "0"),
+          is_fraud = is_fraud)
+```
+
+```{r}
+for(i in 1:nrow(cc_fraud_original)){
+  cc_fraud$dist_merch_trans[i] = round(distm(x = c(cc_fraud_original$long[i], cc_fraud_original$lat[i]), 
+                                             y = c(cc_fraud_original$merch_long[i], cc_fraud_original$merch_lat[i]), 
+                                             fun = distGeo)/1609.34, 2)
+}
+```
+
+```{r}
+cat("range of distances: ", range(cc_fraud$dist_merch_trans))
+cat("\nmean distance: ", mean(cc_fraud$dist_merch_trans))
+cat("\nmedian distance: ", median(cc_fraud$dist_merch_trans))
+
+min_dist <- min(cc_fraud$dist_merch_trans)
+max_dist <- max(cc_fraud$dist_merch_trans)
+interval <- (max_dist - min_dist) / 3
+
+distance_meter <- c(min_dist + interval, min_dist + 2*interval)
+distance_meter
+```
+
+```{r}
+cc_fraud <- mutate(cc_fraud, area = as.factor(area),
+                   city_type = as.factor(city_type),
+                   merchant_type = as.factor(merchant_type),
+                   trans_hour = as.factor(trans_hour),
+                   is_weekend = as.factor(is_weekend),
+                   is_business_jobs = as.factor(is_business_jobs),
+                   is_engineering_jobs = as.factor(is_engineering_jobs),
+                   is_healthcare_jobs = as.factor(is_healthcare_jobs),
+                   is_creative_jobs = as.factor(is_creative_jobs),
+                   is_legal_jobs = as.factor(is_legal_jobs),
+                   is_education_jobs = as.factor(is_education_jobs),
+                   dist_merch_trans = ifelse(dist_merch_trans < distance_meter[1], "short_range", 
+                                             if_else(dist_merch_trans > distance_meter[2], "long_range", "medium_range")),
+                   dist_merch_trans = as.factor(dist_merch_trans),
+                   is_fraud = as.factor(is_fraud)
+)
+
+str(cc_fraud)
+```
+
+```{r}
+any(is.na(cc_fraud))
+```
+
+```{r}
+summary(cc_fraud)
+```
+
+```{r}
+range(cc_fraud$city_pop)
+
+```
+
+```{r eval=FALSE, include=FALSE}
+breaks <- c(0, 1000, 10000, 100000, Inf)
+
+cc_fraud$city_pop <- cut(cc_fraud$city_pop, breaks = breaks, labels = c("small", "medium", "large", "mega"))
+
+table(cc_fraud$city_pop)
+
+cc_fraud$city_pop = as.factor(cc_fraud$city_pop)
+```
+
+Predictive Modelling:
+
+```{r}
+set.seed(1)
+split <- sample.split(cc_fraud$is_fraud, SplitRatio = 0.8)
+train <- subset(cc_fraud, split == T)
+cv <- subset(cc_fraud, split == F)
+
+table(cv$is_fraud)
+
+```
+
+Decision tree model:
+
+```{r}
+tree.model <- rpart(is_fraud ~ ., data = train, method = "class", minbucket = 20)
+visTree(tree.model)
+```
+
+```{r}
+tree.predict <- predict(tree.model, cv, type = "class")
+confusionMatrix(cv$is_fraud, tree.predict)
+```
+
+```{r}
+tree.predict <- predict(tree.model, cv, type = "prob")
+tree.ROCR <- prediction(tree.predict[,2], cv$is_fraud)
+tree.predictions_1 <- tree.predict[,2]
+tree.auc <- as.numeric(performance(tree.ROCR,"auc")@y.values)
+tree.auc
+```
+
+Sampling using Decision Tree:
+Over-Sampled
+
+```{r}
+oversampled_train_data <- ovun.sample(is_fraud ~ ., data = train, method = "over",
+                                      N = 2*nrow(subset(train, train$is_fraud == 0)))$data
+table(oversampled_train_data$is_fraud)
+```
+
+```{r}
+tree.model.over <- rpart(is_fraud ~ ., data = oversampled_train_data, method = "class", minbucket = 20)
+visTree(tree.model.over)
+```
+
+```{r}
+tree.predict.over <- predict(tree.model.over, cv, type = "class")
+confusionMatrix(cv$is_fraud, tree.predict.over)
+```
+
+```{r}
+tree.predict.over <- predict(tree.model.over, cv, type = "prob")
+tree.ROCR.over <- prediction(tree.predict.over[,2], cv$is_fraud )
+tree.predictions_2 <- tree.predict.over[,2]
+tree.auc.over <- as.numeric(performance(tree.ROCR.over,"auc")@y.values)
+tree.auc.over
+```
+
+Under sampling:
+
+```{r}
+undersampled_train_data <- ovun.sample(is_fraud ~ ., data = train, method = "under",
+                                      N = 2*nrow(subset(train, train$is_fraud == 1)), seed = 1)$data
+table(undersampled_train_data$is_fraud)
+```
+
+```{r}
+tree.model.under <- rpart(is_fraud ~ ., data = undersampled_train_data, method = "class", minbucket = 20)
+visTree(tree.model.under)
+```
+
+```{r}
+tree.predict.under <- predict(tree.model.under, cv, type = "class")
+confusionMatrix(cv$is_fraud, tree.predict.under)
+```
+
+```{r}
+tree.predict.under <- predict(tree.model.under, cv, type = "prob")
+tree.ROCR.under <- prediction(tree.predict.under[,2], cv$is_fraud)
+tree.predictions_3 <- tree.predict.under[,2]
+tree.auc.under <- as.numeric(performance(tree.ROCR.under,"auc")@y.values)
+tree.auc.under
+```
+
+Mix of both, over and under sampling:
+
+```{r}
+mix_sampled_train_data <- ovun.sample(is_fraud ~ ., data = train, method = "both", p=0.5, 
+                                  N=nrow(train), seed = 1)$data
+table(mix_sampled_train_data$is_fraud)
+```
+
+```{r}
+tree.model.both <- rpart(is_fraud ~ ., data = mix_sampled_train_data, method = "class", minbucket = 20)
+visTree(tree.model.both)
+```
+
+```{r}
+tree.predict.both <- predict(tree.model.both, cv, type = "class")
+confusionMatrix(cv$is_fraud, tree.predict.both)
+```
+
+```{r}
+tree.predict.both <- predict(tree.model.both, cv, type = "prob")
+tree.ROCR.both <- prediction(tree.predict.both[,2], cv$is_fraud)
+tree.predictions_4 <- tree.predict.both[,2]
+tree.auc.both <- as.numeric(performance(tree.ROCR.both,"auc")@y.values)
+tree.auc.both
+```
+
+ROSE: Generation of synthetic data by –> Randomly Over Sampling Examples
+
+```{r}
+rose_train_data <- ROSE(is_fraud ~ ., data = train, seed = 1)$data
+table(rose_train_data$is_fraud)
+```
+
+```{r}
+tree.model.rose <- rpart(is_fraud ~ ., data = rose_train_data, method = "class", minbucket = 20)
+visTree(tree.model)
+```
+
+```{r}
+tree.predict.rose <- predict(tree.model.rose, cv, type = "class")
+confusionMatrix(cv$is_fraud, tree.predict.rose)
+```
+
+```{r message=FALSE}
+tree.predict.rose <- predict(tree.model.rose, cv, type = "prob")
+tree.ROCR.rose <- prediction(tree.predict.rose[,2], cv$is_fraud)
+tree.predictions_5 <- tree.predict.rose[,2]
+tree.auc.rose <- as.numeric(performance(tree.ROCR.rose, "auc")@y.values)
+tree.auc.rose
+
+tree.ROCR.rose <- prediction(tree.predict.rose[, 2], cv$is_fraud)
+
+auc <- roc(response = cv$is_fraud, predictor = tree.predict.rose[, 2])
+auc
+```
+
+```{r}
+result.auc <- data.frame(normal.auc = tree.auc, over.auc = tree.auc.over, under.auc = tree.auc.under, mix.auc = tree.auc.both, rose.auc = tree.auc.rose)
+result.auc
+```
+
+ROC Plots for Decision Tree with Sampled Data:
+
+```{r message=FALSE}
+cv$trans_amt <- as.numeric(as.character(cv$trans_amt))
+cv$cc_holder_age <- as.numeric(as.character(cv$cc_holder_age))
+
+test_data_XG <- model.matrix(~.-1, data = cv)
+
+test_x <- test_data_XG[, -19]
+test_y <- test_data_XG[, 19]
+model_labels <- c("Normal", "Over Sampling" ,"Under Sampling", "Mixed Sampling", "Rose Sampling")
+
+plot(0, 0, xlim = c(0, 1), ylim = c(0, 1), type = "n", xlab = "False Positive Rate", ylab = "True Positive Rate", main = "ROC Curves - Different Sampling Methods in Decision Tree")
+
+legend_labels <- c()
+auc_values <- c()
+
+for (i in 1:5) {
+  pred_probs_model <- eval(parse(text = paste0("tree.predictions_", i)))
+  roc_obj <- roc(test_y, pred_probs_model)
+  lines(roc_obj, col = i)
+  auc_values[i] <- auc(roc_obj)
+  legend_labels <- c(legend_labels, paste(model_labels[i], "AUC =", round(auc_values[i], 4)))
+}
+
+abline(v = seq(0, 1, 0.1), h = seq(0, 1, 0.1), col = "lightgray", lty = "dotted")
+
+legend("bottomleft", legend = legend_labels, col = 1:5, lwd = 1)
+
+```
+
+
+Random Forest:
+
+```{r message=FALSE}
+set.seed(10)
+rf.model <- randomForest(is_fraud ~ ., data = train,
+                         ntree = 500, nodesize = 20)
+
+rf.predict <- predict(rf.model, cv)
+rf_probs <- predict(rf.model, cv, type = "prob")[, 2]
+rf_probs_1 <- predict(rf.model, cv, type = "prob")[, 2]
+rf_auc <- auc(cv$is_fraud, rf_probs)
+confusionMatrix(cv$is_fraud, rf.predict)
+rf_auc
+```
+
+
+```{r}
+varImpPlot(rf.model)
+```
+
+Over Sampled data RF:
+
+```{r message=FALSE}
+set.seed(10)
+rf.model <- randomForest(is_fraud ~ ., data = oversampled_train_data,
+                         ntree = 100, nodesize = 20)
+
+rf.predict <- predict(rf.model, cv)
+rf_probs <- predict(rf.model, cv, type = "prob")[, 2]
+rf_probs_2 <- predict(rf.model, cv, type = "prob")[, 2]
+rf_auc <- auc(cv$is_fraud, rf_probs)
+confusionMatrix(cv$is_fraud, rf.predict)
+rf_auc
+```
+
+Under Sampled data RF:
+
+```{r}
+set.seed(10)
+rf.model <- randomForest(is_fraud ~ ., data = undersampled_train_data,
+                         ntree = 500, nodesize = 20)
+
+rf.predict <- predict(rf.model, cv)
+rf_probs <- predict(rf.model, cv, type = "prob")[, 2]
+rf_probs_3 <- predict(rf.model, cv, type = "prob")[, 2]
+rf_auc <- auc(cv$is_fraud, rf_probs)
+confusionMatrix(cv$is_fraud, rf.predict)
+rf_auc
+```
+
+Mixed Sampled data RF:
+
+```{r}
+set.seed(10)
+rf.model <- randomForest(is_fraud ~ ., data = mix_sampled_train_data,
+                         ntree = 500, nodesize = 20)
+
+rf.predict <- predict(rf.model, cv)
+rf_probs <- predict(rf.model, cv, type = "prob")[, 2]
+rf_probs_4 <- predict(rf.model, cv, type = "prob")[, 2]
+rf_auc <- auc(cv$is_fraud, rf_probs)
+confusionMatrix(cv$is_fraud, rf.predict)
+rf_auc
+```
+
+Rose Sampled data RF:
+
+```{r}
+set.seed(10)
+rf.model <- randomForest(is_fraud ~ ., data = rose_train_data,
+                         ntree = 500, nodesize = 20)
+
+rf.predict <- predict(rf.model, cv)
+rf_probs <- predict(rf.model, cv, type = "prob")[, 2]
+rf_probs_5 <- predict(rf.model, cv, type = "prob")[, 2]
+rf_auc <- auc(cv$is_fraud, rf_probs)
+confusionMatrix(cv$is_fraud, rf.predict)
+rf_auc
+```
+
+ROC Plots Random Forest with Sampled Data:
+
+```{r message=FALSE}
+model_labels <- c("Normal", "Over Sampling" ,"Under Sampling", "Mixed Sampling", "Rose Sampling")
+
+plot(0, 0, xlim = c(0, 1), ylim = c(0, 1), type = "n", xlab = "False Positive Rate", ylab = "True Positive Rate", main = "ROC Curves - Different Sampling Methods in Random Forest")
+
+legend_labels <- c()
+auc_values <- c()
+
+for (i in 1:5) {
+  pred_probs_model <- eval(parse(text = paste0("rf_probs_", i)))
+  roc_obj <- roc(test_y, pred_probs_model)
+  lines(roc_obj, col = i)
+  auc_values[i] <- auc(roc_obj)
+  legend_labels <- c(legend_labels, paste(model_labels[i], "AUC =", round(auc_values[i], 4)))
+}
+
+abline(v = seq(0, 1, 0.1), h = seq(0, 1, 0.1), col = "lightgray", lty = "dotted")
+
+legend("bottomleft", legend = legend_labels, col = 1:5, lwd = 1)
+
+```
+
+XG Boost on Sampled Data:
+
+```{r message=FALSE}
+
+set.seed(565)
+
+train_data_XG <- model.matrix(~.-1, data = train)
+
+train_x <- train_data_XG[, -19]
+train_y <- train_data_XG[, 19]
+
+xgb_model0 <- xgboost(data = as.matrix(train_x),
+                      label = train_y,
+                      objective = "binary:logistic",
+                      eval_metric = "auc",
+                      nrounds = 100,
+                      verbose = 0)
+
+
+
+predictions_1 <- predict(xgb_model0, newdata = as.matrix(test_x))
+
+roc_obj1 <- roc(test_y, predictions_1)
+
+xg.auc <- auc(roc_obj1)
+cat("AUC:", xg.auc, "\n")
+
+```
+
+```{r}
+predicted_labels <- ifelse(predictions_1 >= 0.5, 1, 0)
+
+xg.acc <- sum(predicted_labels == test_y) / length(test_y)
+cat("Accuracy:", xg.acc, "\n")
+
+confusion_matrix <- table(Actual = test_y, Predicted = predicted_labels)
+print(confusion_matrix)
+
+```
+
+XG Boost Over:
+
+
+```{r message=FALSE}
+
+set.seed(56)
+
+train_data_XG_over <- model.matrix(~.-1, data = oversampled_train_data)
+
+train_x <- train_data_XG_over[, -19]
+train_y <- train_data_XG_over[, 19]
+
+xgb_model1 <- xgboost(data = as.matrix(train_x),
+                      label = train_y,
+                      objective = "binary:logistic",
+                      eval_metric = "auc",
+                      nrounds = 100,
+                      verbose = 0)
+
+predictions_2 <- predict(xgb_model1, newdata = as.matrix(test_x))
+
+roc_obj2 <- roc(test_y, predictions_2)
+
+xg.over.auc <- auc(roc_obj2)
+cat("AUC:", xg.over.auc, "\n")
+
+```
+
+```{r}
+predicted_labels <- ifelse(predictions_2 >= 0.5, 1, 0)
+
+xg.over.acc <- sum(predicted_labels == test_y) / length(test_y)
+cat("Accuracy:", xg.over.acc, "\n")
+
+confusion_matrix <- table(Actual = test_y, Predicted = predicted_labels)
+print(confusion_matrix)
+
+```
+
+XGboost Under Sample:
+
+```{r}
+
+train_data_XG_under <- model.matrix(~.-1, data = undersampled_train_data)
+
+train_x <- train_data_XG_under[, -19]
+train_y <- train_data_XG_under[, 19]
+
+xgb_model2 <- xgboost(data = as.matrix(train_x),
+                      label = train_y,
+                      objective = "binary:logistic",
+                      eval_metric = "auc",
+                      nrounds = 100,
+                      verbose = 0)
+
+predictions_3 <- predict(xgb_model2, newdata = as.matrix(test_x))
+
+roc_obj3 <- roc(test_y, predictions_3)
+
+plot(roc_obj3, main = "ROC Curve")
+
+xg.under.auc <- auc(roc_obj3)
+cat("AUC:", xg.under.auc, "\n")
+
+```
+
+```{r}
+
+predicted_labels <- ifelse(predictions_3 >= 0.5, 1, 0)
+
+confusion_matrix <- table(Actual = test_y, Predicted = predicted_labels)
+print(confusion_matrix)
+
+
+```
+
+```{r}
+xg.under.acc <- sum(predicted_labels == test_y) / length(test_y)
+cat("Accuracy:", xg.under.acc, "\n")
+```
+
+
+XGboost Mix:
+
+```{r}
+train_data_XG_mix <- model.matrix(~.-1, data = mix_sampled_train_data)
+
+train_x <- train_data_XG_mix[, -19]
+train_y <- train_data_XG_mix[, 19]
+
+xgb_model3 <- xgboost(data = as.matrix(train_x),
+                      label = train_y,
+                      objective = "binary:logistic",
+                      eval_metric = "auc",
+                      nrounds = 100,
+                      verbose = 0)
+
+predictions_4 <- predict(xgb_model3, newdata = as.matrix(test_x))
+
+roc_obj4 <- roc(test_y, predictions_4)
+
+plot(roc_obj4, main = "ROC Curve")
+
+xg.mix.auc <- auc(roc_obj4)
+cat("AUC:", xg.mix.auc, "\n")
+
+```
+
+```{r}
+
+predicted_labels <- ifelse(predictions_4 >= 0.5, 1, 0)
+
+confusion_matrix <- table(Actual = test_y, Predicted = predicted_labels)
+print(confusion_matrix)
+
+
+```
+
+```{r}
+xg.mix.acc <- sum(predicted_labels == test_y) / length(test_y)
+cat("Accuracy:", xg.mix.acc, "\n")
+```
+
+XGboost Rose:
+
+```{r}
+train_data_XG_rose <- model.matrix(~.-1, data = rose_train_data)
+
+train_x <- train_data_XG_rose[, -19]
+train_y <- train_data_XG_rose[, 19]
+
+xgb_model4 <- xgboost(data = as.matrix(train_x),
+                      label = train_y,
+                      objective = "binary:logistic",
+                      eval_metric = "auc",
+                      nrounds = 100,
+                      verbose = 0)
+
+predictions_5 <- predict(xgb_model4, newdata = as.matrix(test_x))
+
+roc_obj5 <- roc(test_y, predictions_5)
+
+xg.rose.auc <- auc(roc_obj5)
+cat("AUC:", xg.rose.auc, "\n")
+
+```
+
+```{r}
+predicted_labels <- ifelse(predictions_5 >= 0.5, 1, 0)
+
+confusion_matrix <- table(Actual = test_y, Predicted = predicted_labels)
+print(confusion_matrix)
+
+
+```
+
+```{r}
+xg.rose.acc <- sum(predicted_labels == test_y) / length(test_y)
+cat("Accuracy:", xg.rose.acc, "\n")
+```
+
+```{r}
+result.xg.auc <- data.frame(xg_normal_auc = xg.auc, xg_over_auc = xg.over.acc, xg_under_auc = xg.under.auc, xg_mix_auc = xg.mix.auc, xg_rose_auc = xg.rose.auc)
+result.xg.auc
+
+```
+
+```{r}
+result.auc
+```
+
+```{r}
+names <- dimnames(data.matrix(train_data_XG_over[,-21]))[[2]]
+
+importance_matrix <- xgb.importance(names, model = xgb_model1)
+
+font_size <- 12
+xgb.plot.importance(importance_matrix[1:15,])
+```
+
+
+ROC Plots XG Boosted:
+
+```{r message=FALSE}
+model_labels <- c("Normal", "Over Sampling" ,"Under Sampling", "Mixed Sampling", "Rose Sampling")
+
+plot(0, 0, xlim = c(0, 1), ylim = c(0, 1), type = "n", xlab = "False Positive Rate", ylab = "True Positive Rate", main = "ROC Curves - XGBoost on Different Sampling Methods")
+
+legend_labels <- c()
+auc_values <- c()
+
+for (i in 1:5) {
+  pred_probs_model <- eval(parse(text = paste0("predictions_", i)))
+  roc_obj <- roc(test_y, pred_probs_model)
+  lines(roc_obj, col = i)
+  auc_values[i] <- auc(roc_obj)
+  legend_labels <- c(legend_labels, paste(model_labels[i], "AUC =", round(auc_values[i], 4)))
+}
+
+abline(v = seq(0, 1, 0.1), h = seq(0, 1, 0.1), col = "lightgray", lty = "dotted")
+
+legend("bottomleft", legend = legend_labels, col = 1:5, lwd = 1)
+
+```
